@@ -1,9 +1,9 @@
-import * as Y from 'yjs'
-import * as bc from 'lib0/broadcastchannel'
-import * as AwarenessProtocol from 'y-protocols/awareness'
-import { Observable } from 'lib0/observable'
-import { io, Socket } from 'socket.io-client'
-import { AwarenessChange } from '../types'
+import * as Y from "yjs";
+import * as bc from "lib0/broadcastchannel";
+import * as AwarenessProtocol from "y-protocols/awareness";
+import { Observable } from "lib0/observable";
+import { io, Manager, ManagerOptions, Socket } from "socket.io-client";
+import { AwarenessChange } from "../types";
 
 /**
  * SocketIOProvider instance configuration. Here you can configure:
@@ -20,23 +20,25 @@ export interface ProviderConfiguration {
   /**
    * (Optional) This boolean specify if the provider should connect when the instance is created, by default is true
    */
-  autoConnect?: boolean
+  autoConnect?: boolean;
   /**
    * (Optional) An existent awareness, by default is a new AwarenessProtocol.Awareness instance
    */
-  awareness?: AwarenessProtocol.Awareness
+  awareness?: AwarenessProtocol.Awareness;
   /**
    * (optional) Specify the number of milliseconds to synchronize, by default is -1 (this disable resync interval)
    */
-  resyncInterval?: number
+  resyncInterval?: number;
   /**
    * (Optional) This boolean disable the broadcast channel functionality, by default is false (broadcast channel enabled)
    */
-  disableBc?: boolean
+  disableBc?: boolean;
   /**
    * (Optional) Add the authentication data
    */
-  auth?: { [key: string]: any }
+  auth?: { [key: string]: any };
+
+  managerOptions?: Partial<ManagerOptions>;
 }
 
 /**
@@ -47,55 +49,55 @@ export class SocketIOProvider extends Observable<string> {
    * The connection url to server. Example: `ws://localhost:3001`
    * @type {string}
    */
-  private readonly _url: string
+  private readonly _url: string;
   /**
    * The name of the document room
    * @type {string}
    */
-  public roomName: string
+  public roomName: string;
   /**
    * The broadcast channel room
    * @type {string}
    * @private
    */
-  private readonly _broadcastChannel: string
+  private readonly _broadcastChannel: string;
   /**
    * The socket connection
    * @type {Socket}
    */
-  public socket: Socket
+  public socket: Socket;
   /**
    * The yjs document
    * @type {Y.Doc}
    */
-  public doc: Y.Doc
+  public doc: Y.Doc;
   /**
    * The awareness
    * @type {AwarenessProtocol.Awareness}
    */
-  public awareness: AwarenessProtocol.Awareness
+  public awareness: AwarenessProtocol.Awareness;
   /**
    * Disable broadcast channel, by default is false
    * @type {boolean}
    */
-  public disableBc: boolean
+  public disableBc: boolean;
   /**
    * The broadcast channel connection status indicator
    * @type {boolean}
    */
-  public bcconnected: boolean = false
+  public bcconnected: boolean = false;
   /**
    * The document's sync status indicator
    * @type {boolean}
    * @private
    */
-  private _synced: boolean = false
+  private _synced: boolean = false;
   /**
    * Interval to emit `sync-step-1` to sync changes
    * @type {NodeJS.Timer | null}
    * @private
    */
-  private resyncInterval: NodeJS.Timer | null = null
+  private resyncInterval: NodeJS.Timer | null = null;
 
   /**
    * SocketIOProvider constructor
@@ -105,83 +107,94 @@ export class SocketIOProvider extends Observable<string> {
    * @param {Y.Doc} doc The yjs document
    * @param {ProviderConfiguration} options Configuration options to the SocketIOProvider
    */
-  constructor (url: string, roomName: string, doc: Y.Doc = new Y.Doc(), {
-    autoConnect = true,
-    awareness = new AwarenessProtocol.Awareness(doc),
-    resyncInterval = -1,
-    disableBc = false,
-    auth = {}
-  }: ProviderConfiguration) {
-    super()
-    while (url[url.length - 1] === '/') {
-      url = url.slice(0, url.length - 1)
+  constructor(
+    url: string,
+    roomName: string,
+    doc: Y.Doc = new Y.Doc(),
+    {
+      autoConnect = true,
+      awareness = new AwarenessProtocol.Awareness(doc),
+      resyncInterval = -1,
+      disableBc = false,
+      auth = {},
+      managerOptions = {},
+    }: ProviderConfiguration
+  ) {
+    super();
+    while (url[url.length - 1] === "/") {
+      url = url.slice(0, url.length - 1);
     }
-    this._url = url
-    this.roomName = roomName
-    this.doc = doc
-    this.awareness = awareness
+    this._url = url;
+    this.roomName = roomName;
+    this.doc = doc;
+    this.awareness = awareness;
 
-    this._broadcastChannel = `${url}/${roomName}`
-    this.disableBc = disableBc
+    this._broadcastChannel = `${url}/${roomName}`;
+    this.disableBc = disableBc;
 
     this.socket = io(`${this.url}/yjs|${roomName}`, {
-      autoConnect: false,
-      transports: ['websocket'],
-      forceNew: true,
-      auth: auth
-    })
+      ...{
+        autoConnect: false,
+        transports: ["websocket"],
+        forceNew: true,
+        auth: auth,
+      },
+      ...managerOptions,
+    });
 
-    this.doc.on('update', this.onUpdateDoc)
+    this.doc.on("update", this.onUpdateDoc);
 
-    this.socket.on('connect', () => this.onSocketConnection(resyncInterval))
+    this.socket.on("connect", () => this.onSocketConnection(resyncInterval));
 
-    this.socket.on('disconnect', (event) => this.onSocketDisconnection(event))
+    this.socket.on("disconnect", (event) => this.onSocketDisconnection(event));
 
-    this.socket.on('connect_error', (error) => this.onSocketConnectionError(error))
+    this.socket.on("connect_error", (error) =>
+      this.onSocketConnectionError(error)
+    );
 
-    this.initSyncListeners()
+    this.initSyncListeners();
 
-    this.initAwarenessListeners()
+    this.initAwarenessListeners();
 
-    this.initSystemListeners()
+    this.initSystemListeners();
 
-    awareness.on('update', this.awarenessUpdate)
+    awareness.on("update", this.awarenessUpdate);
 
-    if (autoConnect) this.connect()
+    if (autoConnect) this.connect();
   }
 
   /**
    * Broadcast channel room getter
    * @type {string}
    */
-  public get broadcastChannel (): string {
-    return this._broadcastChannel
+  public get broadcastChannel(): string {
+    return this._broadcastChannel;
   }
 
   /**
    * URL getter
    * @type {string}
    */
-  public get url (): string {
-    return this._url
+  public get url(): string {
+    return this._url;
   }
 
   /**
    * Synchronized state flag getter
    * @type {boolean}
    */
-  public get synced (): boolean {
-    return this._synced
+  public get synced(): boolean {
+    return this._synced;
   }
 
   /**
    * Synchronized state flag setter
    */
-  public set synced (state) {
+  public set synced(state) {
     if (this._synced !== state) {
-      this._synced = state
-      this.emit('synced', [state])
-      this.emit('sync', [state])
+      this._synced = state;
+      this.emit("synced", [state]);
+      this.emit("sync", [state]);
     }
   }
 
@@ -203,13 +216,16 @@ export class SocketIOProvider extends Observable<string> {
    * @private
    */
   private readonly initSyncListeners = (): void => {
-    this.socket.on('sync-step-1', (stateVector: ArrayBuffer, syncStep2: (update: Uint8Array) => void) => {
-      syncStep2(Y.encodeStateAsUpdate(this.doc, new Uint8Array(stateVector)))
-      this.synced = true
-    })
+    this.socket.on(
+      "sync-step-1",
+      (stateVector: ArrayBuffer, syncStep2: (update: Uint8Array) => void) => {
+        syncStep2(Y.encodeStateAsUpdate(this.doc, new Uint8Array(stateVector)));
+        this.synced = true;
+      }
+    );
 
-    this.socket.on('sync-update', this.onSocketSyncUpdate)
-  }
+    this.socket.on("sync-update", this.onSocketSyncUpdate);
+  };
 
   /**
    * This function initializes socket event listeners to synchronize awareness changes.
@@ -223,10 +239,14 @@ export class SocketIOProvider extends Observable<string> {
    * @private
    */
   private readonly initAwarenessListeners = (): void => {
-    this.socket.on('awareness-update', (update: ArrayBuffer) => {
-      AwarenessProtocol.applyAwarenessUpdate(this.awareness, new Uint8Array(update), this)
-    })
-  }
+    this.socket.on("awareness-update", (update: ArrayBuffer) => {
+      AwarenessProtocol.applyAwarenessUpdate(
+        this.awareness,
+        new Uint8Array(update),
+        this
+      );
+    });
+  };
 
   /**
    * This function initialize the window or process events listener. Specifically set ups the
@@ -234,20 +254,22 @@ export class SocketIOProvider extends Observable<string> {
    * @type {() => void}
    */
   private readonly initSystemListeners = (): void => {
-    if (typeof window !== 'undefined') window.addEventListener('beforeunload', this.beforeUnloadHandler)
-    else if (typeof process !== 'undefined') process.on('exit', this.beforeUnloadHandler)
-  }
+    if (typeof window !== "undefined")
+      window.addEventListener("beforeunload", this.beforeUnloadHandler);
+    else if (typeof process !== "undefined")
+      process.on("exit", this.beforeUnloadHandler);
+  };
 
   /**
    * Connect provider's socket
    * @type {() => void}
    */
-  public connect (): void {
+  public connect(): void {
     if (!this.socket.connected) {
-      this.emit('status', [{ status: 'connecting' }])
-      this.socket.connect()
-      if (!this.disableBc) this.connectBc()
-      this.synced = false
+      this.emit("status", [{ status: "connecting" }]);
+      this.socket.connect();
+      if (!this.disableBc) this.connectBc();
+      this.synced = false;
     }
   }
 
@@ -261,30 +283,46 @@ export class SocketIOProvider extends Observable<string> {
    * @param {number} resyncInterval (Optional) A number of milliseconds for interval of synchronize
    * @type {(onConnect: () => void | Promise<void>, resyncInterval: number = -1) => void}
    */
-  private readonly onSocketConnection = (resyncInterval: ProviderConfiguration['resyncInterval'] = -1): void => {
-    this.emit('status', [{ status: 'connected' }])
-    this.socket.emit('sync-step-1', Y.encodeStateVector(this.doc), (update: Uint8Array) => {
-      Y.applyUpdate(this.doc, new Uint8Array(update), this)
-    })
-    if (this.awareness.getLocalState() !== null) this.socket.emit('awareness-update', AwarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]))
+  private readonly onSocketConnection = (
+    resyncInterval: ProviderConfiguration["resyncInterval"] = -1
+  ): void => {
+    this.emit("status", [{ status: "connected" }]);
+    this.socket.emit(
+      "sync-step-1",
+      Y.encodeStateVector(this.doc),
+      (update: Uint8Array) => {
+        Y.applyUpdate(this.doc, new Uint8Array(update), this);
+      }
+    );
+    if (this.awareness.getLocalState() !== null)
+      this.socket.emit(
+        "awareness-update",
+        AwarenessProtocol.encodeAwarenessUpdate(this.awareness, [
+          this.doc.clientID,
+        ])
+      );
     if (resyncInterval > 0) {
       this.resyncInterval = setInterval(() => {
-        if (this.socket.disconnected) return
-        this.socket.emit('sync-step-1', Y.encodeStateVector(this.doc), (update: Uint8Array) => {
-          Y.applyUpdate(this.doc, new Uint8Array(update), this)
-        })
-      }, resyncInterval)
+        if (this.socket.disconnected) return;
+        this.socket.emit(
+          "sync-step-1",
+          Y.encodeStateVector(this.doc),
+          (update: Uint8Array) => {
+            Y.applyUpdate(this.doc, new Uint8Array(update), this);
+          }
+        );
+      }, resyncInterval);
     }
-  }
+  };
 
   /**
    * Disconnect provider's socket
    * @type {() => void}
    */
-  public disconnect (): void {
+  public disconnect(): void {
     if (this.socket.connected) {
-      this.disconnectBc()
-      this.socket.disconnect()
+      this.disconnectBc();
+      this.socket.disconnect();
     }
   }
 
@@ -296,12 +334,20 @@ export class SocketIOProvider extends Observable<string> {
    * @param {() => void | Promise<void>} onDisconnect (Optional) A callback that will be triggered every time that socket is disconnected
    * @type {(event: Socket.DisconnectReason, onDisconnect: () => void | Promise<void>) => void}
    */
-  private readonly onSocketDisconnection = (event: Socket.DisconnectReason): void => {
-    this.emit('connection-close', [event, this])
-    this.synced = false
-    AwarenessProtocol.removeAwarenessStates(this.awareness, Array.from(this.awareness.getStates().keys()).filter(client => client !== this.doc.clientID), this)
-    this.emit('status', [{ status: 'disconnected' }])
-  }
+  private readonly onSocketDisconnection = (
+    event: Socket.DisconnectReason
+  ): void => {
+    this.emit("connection-close", [event, this]);
+    this.synced = false;
+    AwarenessProtocol.removeAwarenessStates(
+      this.awareness,
+      Array.from(this.awareness.getStates().keys()).filter(
+        (client) => client !== this.doc.clientID
+      ),
+      this
+    );
+    this.emit("status", [{ status: "disconnected" }]);
+  };
 
   /**
    * This function is executed when the socket connection fails.
@@ -310,21 +356,23 @@ export class SocketIOProvider extends Observable<string> {
    * @type {(error: Error, onConnectError: (error: Error) => void | Promise<void>) => void}
    */
   private readonly onSocketConnectionError = (error: Error): void => {
-    this.emit('connection-error', [error, this])
-  }
+    this.emit("connection-error", [error, this]);
+  };
 
   /**
    * Destroy the provider. This method clears the document, awareness, and window/process listeners and disconnects the socket.
    * @type {() => void}
    */
-  public destroy (): void {
-    if (this.resyncInterval != null) clearInterval(this.resyncInterval)
-    this.disconnect()
-    if (typeof window !== 'undefined') window.removeEventListener('beforeunload', this.beforeUnloadHandler)
-    else if (typeof process !== 'undefined') process.off('exit', this.beforeUnloadHandler)
-    this.awareness.off('update', this.awarenessUpdate)
-    this.doc.off('update', this.onUpdateDoc)
-    super.destroy()
+  public destroy(): void {
+    if (this.resyncInterval != null) clearInterval(this.resyncInterval);
+    this.disconnect();
+    if (typeof window !== "undefined")
+      window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+    else if (typeof process !== "undefined")
+      process.off("exit", this.beforeUnloadHandler);
+    this.awareness.off("update", this.awarenessUpdate);
+    this.doc.off("update", this.onUpdateDoc);
+    super.destroy();
   }
 
   /**
@@ -335,17 +383,24 @@ export class SocketIOProvider extends Observable<string> {
    * @param {SocketIOProvider} origin The SocketIOProvider instance that emits the change.
    * @type {(update: Uint8Array, origin: SocketIOProvider) => void}
    */
-  private readonly onUpdateDoc = (update: Uint8Array, origin: SocketIOProvider): void => {
+  private readonly onUpdateDoc = (
+    update: Uint8Array,
+    origin: SocketIOProvider
+  ): void => {
     if (origin !== this) {
-      this.socket.emit('sync-update', update)
+      this.socket.emit("sync-update", update);
       if (this.bcconnected) {
-        bc.publish(this._broadcastChannel, {
-          type: 'sync-update',
-          data: update
-        }, this)
+        bc.publish(
+          this._broadcastChannel,
+          {
+            type: "sync-update",
+            data: update,
+          },
+          this
+        );
       }
     }
-  }
+  };
 
   /**
    * This function is called when the server emits the `sync-update` event and applies the received update to the local document.
@@ -354,8 +409,8 @@ export class SocketIOProvider extends Observable<string> {
    * @type {(update: Uint8Array) => void}
    */
   private readonly onSocketSyncUpdate = (update: ArrayBuffer): void => {
-    Y.applyUpdate(this.doc, new Uint8Array(update), this)
-  }
+    Y.applyUpdate(this.doc, new Uint8Array(update), this);
+  };
 
   /**
    * This function is executed when the local awareness changes and this broadcasts the changes per socket and broadcast channel.
@@ -364,16 +419,29 @@ export class SocketIOProvider extends Observable<string> {
    * @param {SocketIOProvider | null} origin The SocketIOProvider instance that emits the change.
    * @type {({ added, updated, removed }: { added: number[], updated: number[], removed: number[] }, origin: SocketIOProvider | null) => void}
    */
-  private readonly awarenessUpdate = ({ added, updated, removed }: AwarenessChange, origin: SocketIOProvider | null): void => {
-    const changedClients = added.concat(updated).concat(removed)
-    this.socket.emit('awareness-update', AwarenessProtocol.encodeAwarenessUpdate(this.awareness, changedClients))
+  private readonly awarenessUpdate = (
+    { added, updated, removed }: AwarenessChange,
+    origin: SocketIOProvider | null
+  ): void => {
+    const changedClients = added.concat(updated).concat(removed);
+    this.socket.emit(
+      "awareness-update",
+      AwarenessProtocol.encodeAwarenessUpdate(this.awareness, changedClients)
+    );
     if (this.bcconnected) {
-      bc.publish(this._broadcastChannel, {
-        type: 'awareness-update',
-        data: AwarenessProtocol.encodeAwarenessUpdate(this.awareness, changedClients)
-      }, this)
+      bc.publish(
+        this._broadcastChannel,
+        {
+          type: "awareness-update",
+          data: AwarenessProtocol.encodeAwarenessUpdate(
+            this.awareness,
+            changedClients
+          ),
+        },
+        this
+      );
     }
-  }
+  };
 
   /**
    * This function is executed when the windows will be unloaded or the process will be closed and this
@@ -382,8 +450,12 @@ export class SocketIOProvider extends Observable<string> {
    * @type {() => void}
    */
   private readonly beforeUnloadHandler = (): void => {
-    AwarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], 'window unload')
-  }
+    AwarenessProtocol.removeAwarenessStates(
+      this.awareness,
+      [this.doc.clientID],
+      "window unload"
+    );
+  };
 
   /**
    * This function subscribes the provider to the broadcast channel and initiates synchronization by broadcast channel.
@@ -391,29 +463,58 @@ export class SocketIOProvider extends Observable<string> {
    */
   private readonly connectBc = (): void => {
     if (!this.bcconnected) {
-      bc.subscribe(this._broadcastChannel, this.onBroadcastChannelMessage)
-      this.bcconnected = true
+      bc.subscribe(this._broadcastChannel, this.onBroadcastChannelMessage);
+      this.bcconnected = true;
     }
-    bc.publish(this._broadcastChannel, { type: 'sync-step-1', data: Y.encodeStateVector(this.doc) }, this)
-    bc.publish(this._broadcastChannel, { type: 'sync-step-2', data: Y.encodeStateAsUpdate(this.doc) }, this)
-    bc.publish(this._broadcastChannel, { type: 'query-awareness', data: null }, this)
-    bc.publish(this._broadcastChannel, { type: 'awareness-update', data: AwarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]) }, this)
-  }
+    bc.publish(
+      this._broadcastChannel,
+      { type: "sync-step-1", data: Y.encodeStateVector(this.doc) },
+      this
+    );
+    bc.publish(
+      this._broadcastChannel,
+      { type: "sync-step-2", data: Y.encodeStateAsUpdate(this.doc) },
+      this
+    );
+    bc.publish(
+      this._broadcastChannel,
+      { type: "query-awareness", data: null },
+      this
+    );
+    bc.publish(
+      this._broadcastChannel,
+      {
+        type: "awareness-update",
+        data: AwarenessProtocol.encodeAwarenessUpdate(this.awareness, [
+          this.doc.clientID,
+        ]),
+      },
+      this
+    );
+  };
 
   /**
    * This function unsubscribes the provider from the broadcast channel and before unsubscribing, updates the awareness.
    * @type {() => void}
    */
   private readonly disconnectBc = (): void => {
-    bc.publish(this._broadcastChannel, {
-      type: 'awareness-update',
-      data: AwarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID], new Map())
-    }, this)
+    bc.publish(
+      this._broadcastChannel,
+      {
+        type: "awareness-update",
+        data: AwarenessProtocol.encodeAwarenessUpdate(
+          this.awareness,
+          [this.doc.clientID],
+          new Map()
+        ),
+      },
+      this
+    );
     if (this.bcconnected) {
-      bc.unsubscribe(this._broadcastChannel, this.onBroadcastChannelMessage)
-      this.bcconnected = false
+      bc.unsubscribe(this._broadcastChannel, this.onBroadcastChannelMessage);
+      this.bcconnected = false;
     }
-  }
+  };
 
   /**
    * This method handles messages received by the broadcast channel and responds to them.
@@ -421,38 +522,56 @@ export class SocketIOProvider extends Observable<string> {
    * @param {SocketIOProvider} origin The SocketIOProvider instance that emits the change
    * @type {(message: { type: string, data: any }, origin: SocketIOProvider) => void}
    */
-  private readonly onBroadcastChannelMessage = (message: { type: string, data: any }, origin: SocketIOProvider): void => {
+  private readonly onBroadcastChannelMessage = (
+    message: { type: string; data: any },
+    origin: SocketIOProvider
+  ): void => {
     if (origin !== this && message.type.length > 0) {
       switch (message.type) {
-        case 'sync-step-1':
-          bc.publish(this._broadcastChannel, {
-            type: 'sync-step-2',
-            data: Y.encodeStateAsUpdate(this.doc, message.data)
-          }, this)
-          break
+        case "sync-step-1":
+          bc.publish(
+            this._broadcastChannel,
+            {
+              type: "sync-step-2",
+              data: Y.encodeStateAsUpdate(this.doc, message.data),
+            },
+            this
+          );
+          break;
 
-        case 'sync-step-2':
-          Y.applyUpdate(this.doc, new Uint8Array(message.data), this)
-          break
+        case "sync-step-2":
+          Y.applyUpdate(this.doc, new Uint8Array(message.data), this);
+          break;
 
-        case 'sync-update':
-          Y.applyUpdate(this.doc, new Uint8Array(message.data), this)
-          break
+        case "sync-update":
+          Y.applyUpdate(this.doc, new Uint8Array(message.data), this);
+          break;
 
-        case 'query-awareness':
-          bc.publish(this._broadcastChannel, {
-            type: 'awareness-update',
-            data: AwarenessProtocol.encodeAwarenessUpdate(this.awareness, Array.from(this.awareness.getStates().keys()))
-          }, this)
-          break
+        case "query-awareness":
+          bc.publish(
+            this._broadcastChannel,
+            {
+              type: "awareness-update",
+              data: AwarenessProtocol.encodeAwarenessUpdate(
+                this.awareness,
+                Array.from(this.awareness.getStates().keys())
+              ),
+            },
+            this
+          );
+          break;
 
-        case 'awareness-update':
-          AwarenessProtocol.applyAwarenessUpdate(this.awareness, new Uint8Array(message.data), this)
-          break
+        case "awareness-update":
+          AwarenessProtocol.applyAwarenessUpdate(
+            this.awareness,
+            new Uint8Array(message.data),
+            this
+          );
+          break;
 
         default:
-          break
+          break;
       }
     }
-  }
+  };
 }
